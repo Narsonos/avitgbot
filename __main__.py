@@ -81,18 +81,23 @@ async def send_welcome(message: types.Message):
 @router.message(Command('latest'))
 async def check_latest(message: types.Message):
     with sqlite3.connect(db_file) as conn:
+        sent_message = await bot.send_message(user_id, "Processing the request...", parse_mode=ParseMode.HTML)
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM requests')
         rows = cursor.fetchall()
         requests = [AvitoRequest(*row) for row in rows]
 
         response = ""
-        for request in requests:
-            offer = await fetch_latest_offer(request.link)
-            response += MessageBuilder.describe_latest_for_request(request,offer) + '\n\n'
-            await asyncio.sleep(5)
-
-        await message.reply(response) 
+        try:
+            for i,request in enumerate(requests):
+                await bot.edit_message_text(text=f"Processing the request {i}...",chat_id=user_id,message_id=sent_message.message_id)
+                print(request)
+                offer = await fetch_latest_offer(request.link)
+                response += MessageBuilder.describe_latest_for_request(request,offer) + '\n\n'
+                await asyncio.sleep(5)
+            await bot.edit_message_text(text=response,chat_id=user_id,message_id=sent_message.message_id)
+        except Exception as e:
+            await bot.edit_message_text(text=f'Exception: {e}',chat_id=user_id,message_id=sent_message.message_id)
 
 
 @router.message(Command('add'))
