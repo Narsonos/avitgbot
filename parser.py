@@ -1,18 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
-from dataclasses import dataclass
 import re
 import datetime
-
-@dataclass
-class Offer:
-    id: int
-    title: str
-    link: str
-    desc: str
-    date: datetime.datetime
-    price: int
-
+from db import Offer
 
 class Parser:
     base = "https://avito.ru"

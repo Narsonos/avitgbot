@@ -10,12 +10,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from config import bot_token, db_file, user_id
-from db import init_db
+from db import init_db, AvitoRequest
 from parser import Parser
 
 import sys
 import requests
 import datetime
+from dataclasses import dataclass
 
 dp = Dispatcher()
 router = Router()
@@ -27,6 +28,20 @@ bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 class Form(StatesGroup):
     adding_request = State()
     deleting_request = State()
+
+
+class MessageBuilder:
+    @staticmethod
+    def describe_latest_for_request(request,offer):
+        return f"[OFFER]: <a href='{offer.link}'>{offer.title}</a>\n[PRICE]: {offer.price}\n[REQUEST]: <a href='{request.link}'>{request.name}</a>\n[DESCRIPTION]:\n{offer.desc}"
+
+    @staticmethod
+    def list_requests(requests):
+        response = "Your requests:\n"
+        for request in requests:
+            response += f"{request.id}. <a href='{request.link}'>{request.name}</a> \n"
+        return response
+
 
 
 
@@ -43,24 +58,42 @@ async def track_requests():
 
 
 async def check_for_new_offers(cursor, request):
-    print(request)
-    request_id,request_link,request_last_id,request_last_link,request_last_date,request_name = request
-    request_last_date = datetime.datetime.strptime(request_last_date,'%Y-%m-%d %H:%M:%S.%f')
+    request = AvitoRequest(*request)
+    request.latest_offer_date = datetime.datetime.strptime(request.latest_offer_date,'%Y-%m-%d %H:%M:%S.%f')
 
-    offer = await fetch_latest_offer(request[1])
-    print(f'{request_last_date}')
-    if offer and (request_last_id != offer.id) and (request_last_date < offer.date):  # Compare with stored latest offer ID
-        await bot.send_message(user_id,f"[OFFER]: <a href='{offer.link}'>{offer.title}</a>\n[PRICE]: {offer.price}\n[REQUEST]: <a href='{request_link}'>{request_name}</a>\n[DESCRIPTION]:\n{offer.desc}", parse_mode=ParseMode.HTML)
-        # Update the latest offer ID in the database
-        cursor.execute('UPDATE requests SET latest_offer_link = ?, latest_offer_id = ?, latest_offer_date = ? WHERE id = ?', (offer.link,offer.id,offer.date,request_id))
+    offer = await fetch_latest_offer(request.link)
+    if offer and (request.latest_offer_id != offer.id) and (request.latest_offer_date < offer.date):  # Compare with stored latest offer
+
+        msg = MessageBuilder.describe_latest_for_request(request,offer)
+        await bot.send_message(user_id, msg, parse_mode=ParseMode.HTML)
+
+        cursor.execute('UPDATE requests SET latest_offer_link = ?, latest_offer_id = ?, latest_offer_date = ? WHERE id = ?', (offer.link,offer.id,offer.date,request.id))
         cursor.connection.commit()
 
 async def fetch_latest_offer(link):
     return parser.get_first(link)  # Example ID
 
+
 @router.message(Command('start','help'))
 async def send_welcome(message: types.Message):
     await message.reply("Welcome! Use /add to add a request, /delete to remove one, and /status to check requests.")
+
+@router.message(Command('latest'))
+async def check_latest(message: types.Message):
+    with sqlite3.connect(db_file) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM requests')
+        rows = cursor.fetchall()
+        requests = [AvitoRequest(*row) for row in rows]
+
+        response = ""
+        for request in requests:
+            offer = await fetch_latest_offer(request.link)
+            response += MessageBuilder.describe_latest_for_request(request,offer) + '\n\n'
+            await asyncio.sleep(5)
+
+        await message.reply(response) 
+
 
 @router.message(Command('add'))
 async def add_request(message: types.Message, state: FSMContext):
@@ -89,14 +122,13 @@ async def delete_request(message: types.Message, state: FSMContext):
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM requests')
         requests = cursor.fetchall()
+        requests = [AvitoRequest(*req) for req in cursor.fetchall()]
 
     if not requests:
         await message.reply("No requests found!")
         return
     
-    response = "Your requests:\n"
-    for request_id,request_link,request_last_id,request_last_link,request_last_date,request_name in requests:
-        response += f"{request_id}. <a href='{request_link}'>{request_name}</a> \n"
+    response = MessageBuilder.list_requests(requests)
     
     await state.set_state(Form.deleting_request)
     await message.reply(response + "Select the number of the request to delete.", parse_mode=ParseMode.HTML)
@@ -109,7 +141,7 @@ async def process_delete_request(message: types.Message, state: FSMContext):
         with sqlite3.connect(db_file) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM requests')
-            requests = [req[0] for req in cursor.fetchall()]
+            requests = [AvitoRequest(*req).id for req in cursor.fetchall()]
             if index in requests:
                 cursor.execute('DELETE FROM requests WHERE id = ?', (str(index)))
                 conn.commit()
@@ -126,16 +158,14 @@ async def status_requests(message: types.Message):
     with sqlite3.connect(db_file) as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM requests')
-        requests = cursor.fetchall()
+        requests = [AvitoRequest(*req) for req in cursor.fetchall()]
+
 
     if not requests:
         await message.reply("No requests being tracked!")
         return
 
-    response = "Your tracked requests:\n"
-    for request_id,request_link,request_last_id,request_last_link,request_last_date,request_name in requests:
-        response += f"{request_id}. <a href='{request_link}'>{request_name}</a> \n"
-    
+    response = MessageBuilder.list_requests(requests)
     await message.reply(response)
 
 

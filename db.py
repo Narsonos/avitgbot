@@ -1,5 +1,25 @@
 import sqlite3
 from config import db_file
+from dataclasses import dataclass
+import datetime
+
+@dataclass
+class Offer:
+    id: int
+    title: str
+    link: str
+    desc: str
+    date: datetime.datetime | str
+    price: int
+
+@dataclass
+class AvitoRequest:
+    id: int
+    link: str
+    latest_offer_id: int
+    latest_offer_link: str
+    latest_offer_date: datetime.datetime
+    name: str
 
 
 def init_db():
@@ -16,6 +36,8 @@ def init_db():
             )
         ''')
         conn.commit()
+
+
 
 
 if __name__ == "__main__":
